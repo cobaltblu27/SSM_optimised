@@ -17,6 +17,13 @@ from collections import defaultdict
 from sklearn.metrics.pairwise import cosine_similarity
 
 class mychem():
+    def _adjacency_dense(molgraph):
+        try:
+            adjacency = nx.adj_matrix(molgraph)
+        except AttributeError:
+            adjacency = nx.adjacency_matrix(molgraph)
+        return np.array(adjacency.todense(), dtype=np.float64)
+
     def extendedSMILES(mol, smi):
         atoms = list(set([x.GetSymbol() for x in mol.GetAtoms()]))
         atoms = atoms + [c.lower() for c in atoms if len(c) == 1 ]
@@ -128,7 +135,7 @@ class mychem():
     
 
     def cal_T(self, molobj, molgraph, smiles, chemistry="graph"):
-        A = np.array(nx.adj_matrix(molgraph).todense(), dtype = np.float64) 
+        A = self._adjacency_dense(molgraph)
         D = np.diag(np.sum(A, axis=0)) 
         T = np.dot(np.linalg.inv(D),A)  
 
@@ -186,12 +193,13 @@ class mychem():
                     neigh = adj[visited[ind][-1]]
 
                     p = p_cache[(k, ind)]
+                    neigh_weights = [float(np.asarray(p[i]).reshape(-1)[0]) for i in neigh]
 
                     if mode == 'argmax':
-                        visit_ind = np.argmax( [p[i] for i in neigh] )
+                        visit_ind = int(np.argmax(neigh_weights))
                     elif mode == 'random':
 
-                        visit_ind = random.choices( population = np.arange(len(neigh)).reshape(-1,1), weights = [p[i] for i in neigh])[0][0]
+                        visit_ind = random.choices(population=list(range(len(neigh))), weights=neigh_weights)[0]
 
                     visit = neigh[visit_ind]
                     visited[ind].append(visit)
