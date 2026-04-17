@@ -1,6 +1,6 @@
 # SSM (Supervised Subgraph Mining) - Optimized Version
 
-이 버전은 원본 SubDyve의 SSM(Supervised Subgraph Mining) 모듈을 속도 최적화한 것입니다.
+이 버전은 원본 [SubDyve](https://github.com/J-Sub/SubDyve)의 SSM(Supervised Subgraph Mining) 모듈을 속도 최적화한 것입니다.
 
 **성능 최적화 버전**: 원본 104시간 → 2.4시간 (43배 단축)  
 **원본 저장소**: https://github.com/sslim0814/SSM  
@@ -243,7 +243,15 @@ python tests/verify_output.py --baseline baseline_results/ --new optimized_resul
 
 ## Reference
 
-이 코드를 사용하는 경우 원본 논문을 인용해주세요:
+이 코드를 사용하는 경우 다음을 인용해주세요:
+
+### 1. SubDyve (기반 코드)
+
+이 최적화 버전은 **SubDyve** 프로젝트의 SSM 모듈을 기반으로 합니다:
+
+**SubDyve 저장소**: https://github.com/J-Sub/SubDyve
+
+### 2. 원본 SSM 논문
 
 **Lim, Sangsoo, et al.** "Supervised chemical graph mining improves drug-induced liver injury prediction." _iScience_ 26.1 (2023).
 
@@ -259,7 +267,7 @@ python tests/verify_output.py --baseline baseline_results/ --new optimized_resul
 }
 ```
 
-**원본 저장소**: https://github.com/sslim0814/SSM
+**원본 SSM 저장소**: https://github.com/sslim0814/SSM
 
 ---
 
