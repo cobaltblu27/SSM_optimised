@@ -5,13 +5,19 @@ import pandas as pd
 from collections import defaultdict
 from tqdm import tqdm
 from rdkit import Chem
+from pathlib import Path
+
+# Default: project_root based on script location
+project_root = Path(__file__).parent.parent
+default_result_root = project_root / "results"
+default_log_dir = project_root / "logs"
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--target', type=str, required=True, help='Target protein name (e.g., ACES)')
 parser.add_argument('--top', type=int, default=100, help='Top N entries to save')
 parser.add_argument('--threshold', type=float, required=True, help='Threshold value used in directory names')
-parser.add_argument('--log_dir', type=str, required=True, help='Path to the log directory containing AUC CSV')
-parser.add_argument('--result_root', type=str, required=True, help='Root path to results/ directory')
+parser.add_argument('--log_dir', type=str, default=str(default_log_dir), help='Path to the log directory containing AUC CSV')
+parser.add_argument('--result_root', type=str, default=str(default_result_root), help='Root path to results/ directory')
 args = parser.parse_args()
 
 target = args.target
@@ -57,8 +63,11 @@ def remove_structurally_duplicate_smarts(df, smarts_col='DiSC'):
             seen_canonical.add(canonical)
     return df.iloc[unique_indices].reset_index(drop=True)
 
-result_path = f'{result_root}/{THRESHOLD}/{target}/'
-DiSC_paths = glob.glob(f'{result_path}iteration_{max_AUC_iteration}/DiSC_*')
+result_path = f'{result_root}/{target}/'
+DiSC_paths = glob.glob(f'{result_path}iteration_{max_AUC_iteration}/DiSC_*.csv')
+
+if not DiSC_paths:
+    raise FileNotFoundError(f"No DiSC_*.csv files found in {result_path}iteration_{max_AUC_iteration}/")
 
 concat_df = pd.concat([pd.read_csv(path) for path in DiSC_paths], axis=0)
 concat_df.sort_values(by='significance', ascending=False, inplace=True)

@@ -1,0 +1,6 @@
+Number,SMILES,prediction,probability
+0,c1ccc2c(c1)ccc1ccccc12,0,0.27
+1,CC(C)NCC(O)COc1ccccc1,0,0.22
+2,Cc1ccc(Cl)cc1Nc1ncccc1C(=O)O,0,0.37
+3,CN1C(=O)CN=C(c2ccccc2)c2cc(Cl)ccc21,0,0.45
+4,COc1ccc(C(=O)Nc2ccccc2)cc1OC,0,0.45

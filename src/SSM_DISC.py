@@ -7,12 +7,14 @@ import pandas as pd
 from collections import defaultdict
 from math import log
 from copy import deepcopy
+from multiprocessing import Pool
 from sklearn.ensemble import RandomForestClassifier as RFC
 from sklearn.metrics import accuracy_score, balanced_accuracy_score, precision_score, recall_score, f1_score, roc_auc_score, matthews_corrcoef, confusion_matrix
 from mychem import *
 from utils import *
 
 import sys
+import random as _random
 import numpy as np
 import rdkit
 from rdkit import Chem
@@ -21,12 +23,24 @@ RDLogger.DisableLog('rdApp.*')
 rdDepictor.SetPreferCoordGen(True)
 
 
+def _do_rw_worker(args):
+    """Module-level worker function for multiprocessing (must be picklable)."""
+    ltkbid, molgraph, T, molobj, n_rw, n_walkers, rw_mode, seed = args
+    _random.seed(seed)
+    np.random.seed(seed % (2**32))
+    dpaths = mychem.cal_path_df(molgraph, T, walkLength=n_rw, n_walker=n_walkers, mode=rw_mode)
+    edge_used, edge_list = mychem.rwr_summary(molgraph, dpaths, n_walker=n_walkers)
+    frag_count, frag_smiles = mychem.rw_getSmilesPathDict(mychem, molobj, edge_list)
+    return ltkbid, edge_used, edge_list, frag_count, frag_smiles
+
+
 class DILInew:
-    def __init__(self, chemistry='graph', n_rw=10, n_alpha=0.5, iteration=10, pruning=False, n_walker=100, rw_mode="argmax"):
+    def __init__(self, chemistry='graph', n_rw=10, n_alpha=0.5, iteration=10, pruning=False, n_walker=100, rw_mode="argmax", n_jobs=1):
         self.chemistry, self.n_rw, self.n_alpha = chemistry, n_rw, n_alpha
         self.n_iteration, self.pruning, self.n_walkers = iteration, pruning, n_walker
         self.n_train, self.n_valid = 0, 0
         self.rw_mode = rw_mode
+        self.n_jobs = n_jobs
         #
         self.molinfo_df = pd.DataFrame()
         self.train_molinfo_df = pd.DataFrame()
@@ -185,23 +199,47 @@ class DILInew:
             start = time.time()
             print(f'Start iteration {nI + 1} ----- ', end="")
 
-            for ltkbid in self.molinfo_df["ID"]:  # iterate over molecules
+            if nI > 0:
+                pd_pref = pd.DataFrame(
+                    self.dEdgeClassDict[nI-1], columns=self.dEdgeClassDict[nI-1].keys()).fillna(0)
+
+            # Phase 1: Compute transition matrices (sequential, depends on previous iteration)
+            mol_ids = list(self.molinfo_df["ID"])
+            for ltkbid in mol_ids:
                 smiles = self.molinfo_df["SMILES"][ltkbid]
 
-                # cal_T(molobj, molgraph, smiles, chemistry='graph') # first iteration
                 if nI == 0:
                     T = mychem.cal_T(mychem, self.molinfo_df["molobj"][ltkbid], self.molinfo_df["molgraph"]
-                                     [ltkbid], smiles, chemistry=self.chemistry)  # transition matrix of graph
+                                     [ltkbid], smiles, chemistry=self.chemistry)
                 else:
-                    # row: class, column: fragment, value: count
-                    pd_pref = pd.DataFrame(
-                        self.dEdgeClassDict[nI-1], columns=self.dEdgeClassDict[nI-1].keys()).fillna(0)
                     self.dMolPreferDict[nI - 1][ltkbid] = self.get_individual_F(nI, pd_pref, ltkbid)
                     T = self.rw_update_transitions(
-                        self.dMolTransDict[nI-1][ltkbid], self.dMolPreferDict[nI-1][ltkbid], self.n_alpha)  # T * (1-alpha) + F * alpha
+                        self.dMolTransDict[nI-1][ltkbid], self.dMolPreferDict[nI-1][ltkbid], self.n_alpha)
 
                 self.dMolTransDict[nI][ltkbid] = T
-                self.DoRandomWalk(nI, ltkbid, T)  # each molecule
+
+            # Phase 2: Random walks (parallelizable, independent per molecule)
+            if self.n_jobs > 1:
+                worker_args = []
+                for idx, ltkbid in enumerate(mol_ids):
+                    seed = (self.n_walkers * 10000 + nI * 1000 + idx) % (2**32)
+                    worker_args.append((
+                        ltkbid,
+                        self.molinfo_df["molgraph"][ltkbid],
+                        self.dMolTransDict[nI][ltkbid],
+                        self.molinfo_df["molobj"][ltkbid],
+                        self.n_rw, self.n_walkers, self.rw_mode, seed
+                    ))
+                with Pool(self.n_jobs) as pool:
+                    results = pool.map(_do_rw_worker, worker_args)
+                for ltkbid, edge_used, edge_list, frag_count, frag_smiles in results:
+                    self.dEdgeUsedCount[nI][ltkbid] = edge_used
+                    self.dEdgelistUsage[nI][ltkbid] = edge_list
+                    self.dNodeFragCount[nI][ltkbid] = frag_count
+                    self.dNodeFragSmiles[nI][ltkbid] = frag_smiles
+            else:
+                for ltkbid in mol_ids:
+                    self.DoRandomWalk(nI, ltkbid, self.dMolTransDict[nI][ltkbid])
 
             self.dEdgeClassDict[nI] = {}
             self.cal_preference(nI)  # Save Preference each iteration
@@ -225,22 +263,48 @@ class DILInew:
             start = time.time()
             print(f'Start iteration {nI + 1} ----- ', end="")
 
-            for ltkbid in self.molinfo_df.index:  # iterate over molecules
+            if nI > 0:
+                pd_pref = pd.DataFrame(
+                    train_edgeclassdict[nI-1], columns=train_edgeclassdict[nI-1].keys()).fillna(0)
+
+            # Phase 1: Compute transition matrices (sequential)
+            mol_ids = list(self.molinfo_df.index)
+            for ltkbid in mol_ids:
                 smiles = self.molinfo_df["SMILES"][ltkbid]
 
-                if nI == 0:  # cal_T(molobj, molgraph, smiles, chemistry='graph')
+                if nI == 0:
                     T = mychem.cal_T(mychem, self.molinfo_df["molobj"][ltkbid], self.molinfo_df["molgraph"]
-                                     [ltkbid], smiles, chemistry=self.chemistry)  # transition matrix
+                                     [ltkbid], smiles, chemistry=self.chemistry)
                 else:
-                    pd_pref = pd.DataFrame(
-                        train_edgeclassdict[nI-1], columns=train_edgeclassdict[nI-1].keys()).fillna(0)
                     self.dMolPreferDict[nI-1][ltkbid] = self.get_individual_F(
                         nI, pd_pref, ltkbid, mode='test')
                     T = self.rw_update_transitions(
-                        self.dMolTransDict[nI-1][ltkbid], self.dMolPreferDict[nI-1][ltkbid], self.n_alpha)  # T * (1-alpha) + F * alpha
+                        self.dMolTransDict[nI-1][ltkbid], self.dMolPreferDict[nI-1][ltkbid], self.n_alpha)
 
                 self.dMolTransDict[nI][ltkbid] = T
-                self.DoRandomWalk(nI, ltkbid, T)  # each molecule
+
+            # Phase 2: Random walks (parallelizable)
+            if self.n_jobs > 1:
+                worker_args = []
+                for idx, ltkbid in enumerate(mol_ids):
+                    seed = (self.n_walkers * 10000 + nI * 1000 + idx) % (2**32)
+                    worker_args.append((
+                        ltkbid,
+                        self.molinfo_df["molgraph"][ltkbid],
+                        self.dMolTransDict[nI][ltkbid],
+                        self.molinfo_df["molobj"][ltkbid],
+                        self.n_rw, self.n_walkers, self.rw_mode, seed
+                    ))
+                with Pool(self.n_jobs) as pool:
+                    results = pool.map(_do_rw_worker, worker_args)
+                for ltkbid, edge_used, edge_list, frag_count, frag_smiles in results:
+                    self.dEdgeUsedCount[nI][ltkbid] = edge_used
+                    self.dEdgelistUsage[nI][ltkbid] = edge_list
+                    self.dNodeFragCount[nI][ltkbid] = frag_count
+                    self.dNodeFragSmiles[nI][ltkbid] = frag_smiles
+            else:
+                for ltkbid in mol_ids:
+                    self.DoRandomWalk(nI, ltkbid, self.dMolTransDict[nI][ltkbid])
 
             fin = round((time.time() - start) / 60, 3)
             print(f'{self.n_rw} Random Walks completed in {fin} mins.')
