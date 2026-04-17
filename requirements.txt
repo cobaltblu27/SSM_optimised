@@ -1,0 +1,17 @@
+# SSM (Supervised Subgraph Mining) - Optimized Version
+# Requirements
+
+# Core dependencies
+rdkit>=2024.03
+networkx>=2.8,<3.0  # SSM uses networkx 2.x API (adj_matrix)
+numpy>=1.26,<2.0
+pandas>=1.5,<2.0
+scipy>=1.13
+scikit-learn>=1.6
+tqdm>=4.67
+pysmiles>=1.0,<2.0  # pysmiles 2.x requires networkx 3.x
+
+# Note: This is a minimal requirements file for SSM only.
+# If you're using the full SubDyve pipeline, you may need additional packages:
+# - torch, torch-geometric (for GNN models)
+# - transformers (for ChemBERTa)
